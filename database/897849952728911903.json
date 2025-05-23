@@ -1,10 +1,10 @@
 {
     "guild_name": "BOTS",
     "guild_id": 897849952728911903,
-    "tickets_category_id": 1375131719505543290,
+    "tickets_category_id": 1375362771817988146,
     "staff_rold_id": 1019544013654732860,
     "transcript_channel_id": 899331437432541206,
     "log_channel_id": 899331437432541206,
     "welcome_message": "Welcome bro",
-    "ticket_counter": 0
+    "ticket_counter": 4
 }

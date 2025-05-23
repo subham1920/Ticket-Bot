@@ -1,6 +1,7 @@
 import os
 import discord
 from discord.ext import commands
+from discord.ui import button, View
 from dotenv import load_dotenv
 import json
 import asyncio
@@ -20,6 +21,10 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} guilds')
+    
+    # Add all buttons to make it persistent view
+    bot.add_view(TicketView())
+
 
 #Test command if the bot is working or not 
 @bot.command(name='ping')
@@ -30,7 +35,7 @@ async def ping(ctx):
 #vvvFEATURES AND COMMANDS START FROM HERE vvv
 
 
-#!setup command which 
+#!setup command which creates config file for the server and asks for all the variables 
 @bot.command()
 async def setup(ctx : commands.Context):
     guild_id = ctx.guild.id
@@ -52,7 +57,7 @@ async def setup(ctx : commands.Context):
             "transcript_channel_id": None,
             "log_channel_id": None,
             "welcome_message": None,
-            "ticket_counter": 0         
+            "ticket_counter": 0    
         }#Basic stucture for our database
         with open(file_path , "w") as f:
             json.dump(data, f, indent=4)
@@ -91,7 +96,7 @@ async def setup(ctx : commands.Context):
         await ctx.send(timeout_msg)
         return
 
-    staff_role = s_role_id.role_mentions[0]#role name
+    staff_role = s_role_id.role_mentions[0]
 
     data["staff_rold_id"] = staff_role.id#Error if a user mentions a @user not a @role Need to fix it
 
@@ -134,11 +139,96 @@ async def setup(ctx : commands.Context):
     data["welcome_message"] = wc_msg.content
 
     await ctx.send("You have configured the server :D")
+    await ctx.send("Run !ticketpanel in the desired channel")
 
 
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
+# Define persistent ticket view class
+class TicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Make the view persistent
+    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        # Process ticket creation
+        directory_path = "database"
+        file_name = f"{interaction.guild.id}.json"
+        file_path = os.path.join(directory_path, file_name)
+        
+        try:
+            # Acknowledge the interaction immediately to prevent timeout
+            await interaction.response.defer(ephemeral=True)
+            
+            with open(file_path, "r") as f:
+                data = json.load(f)
+
+            category_id = data["tickets_category_id"]
+            counter = data["ticket_counter"]
+            category = interaction.guild.get_channel(category_id)
+
+            # Create the ticket channel
+            ticket_channel = await interaction.guild.create_text_channel(f"ticket-{counter}", category=category)
+            data["ticket_counter"] += 1
+            
+            # Set permissions
+            staff_role_id = data["staff_rold_id"]
+            staff_role = interaction.guild.get_role(staff_role_id)
+            
+            await ticket_channel.set_permissions(interaction.guild.default_role, view_channel=False)
+            await ticket_channel.set_permissions(interaction.user, view_channel=True, send_messages=True)
+            await ticket_channel.set_permissions(staff_role, view_channel=True, send_messages=True)
+            
+            # Send welcome message
+            welcome_msg = data["welcome_message"]
+            await ticket_channel.send(f"{interaction.user.mention} {welcome_msg}")
+            
+            # Use followup instead of response since we already deferred
+            await interaction.followup.send(f"Ticket created! {ticket_channel.mention}", ephemeral=True)
+
+            # Save updated counter
+            with open(file_path, "w") as f:
+                json.dump(data, f, indent=4)
+                
+        except Exception as e:
+            # Use try/except in case the initial response failed
+            try:
+                await interaction.followup.send(f"Error creating ticket: {str(e)}", ephemeral=True)
+            except:
+                try:
+                    await interaction.response.send_message(f"Error creating ticket: {str(e)}", ephemeral=True)
+                except:
+                    print(f"Failed to respond to interaction: {str(e)}")
+
+#!ticket panel command which sends the ticketpanel embed msg from which users can create a ticket
+@bot.command()
+async def ticketpanel(ctx : commands.Context):
+    directory_path = "database"
+    file_name = f"{ctx.guild.id}.json"
+    file_path = os.path.join(directory_path, file_name)
+
+    guild_file = os.path.exists(file_path)
+
+    if not guild_file:
+        await ctx.send("Run the command !setup before sending the ticketpanel")
+        return
+    
+    try:
+        with open(file_path, "r") as f:
+            data = json.load(f)
+    except Exception as e:
+        await ctx.send(f"Error loading configuration: {str(e)}")
+        return
+    
+    create_ticket_embed = discord.Embed(
+        title="Create ticket!",
+        description="If you have any problem, sort it out by creating a ticket",
+        color=discord.Colour.green()
+    )
+
+    # Send embed with the persistent view
+    await ctx.channel.send(embed=create_ticket_embed, view=TicketView())
+        
 
 
 
