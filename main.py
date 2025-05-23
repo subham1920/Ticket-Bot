@@ -98,9 +98,9 @@ async def setup(ctx : commands.Context):
 
     staff_role = s_role_id.role_mentions[0]
 
-    data["staff_rold_id"] = staff_role.id#Error if a user mentions a @user not a @role Need to fix it
+    data["staff_rold_id"] = staff_role.id#ERROR : if a user mentions a @user not a @role Need to fix it
 
-    await ctx.send(f"Set Staff role to : {staff_role}")
+    await ctx.send(f"Set Staff role to : {staff_role.mention}")
     await ctx.send("What channel should be the transcript channel")
 
     try:
@@ -114,7 +114,7 @@ async def setup(ctx : commands.Context):
 
     data["transcript_channel_id"] = channel_id
 
-    await ctx.send(f"Set Tanscript Channel to : {transcript_channel.name}")
+    await ctx.send(f"Set Tanscript Channel to : {transcript_channel.mention}")
     await ctx.send("Please mention the channel we should send ticket logs to?")
 
     try:
@@ -127,7 +127,7 @@ async def setup(ctx : commands.Context):
 
     data["log_channel_id"] = log_channel.id
 
-    await ctx.send(f"We have set the log channel to {log_channel.name}")
+    await ctx.send(f"We have set the log channel to : {log_channel.mention}")
     await ctx.send("Please type out the welcome message we should send when a user creates a ticket")
 
     try:
@@ -145,11 +145,10 @@ async def setup(ctx : commands.Context):
     with open(file_path, "w") as f:
         json.dump(data, f, indent=4)
 
-# Define persistent ticket view class
 class TicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # Make the view persistent
-    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.primary, custom_id="create_ticket")
+    @discord.ui.button(label="Create Ticket", style=discord.ButtonStyle.green, custom_id="create_ticket")
     async def create_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
         # Process ticket creation
         directory_path = "database"
@@ -169,6 +168,8 @@ class TicketView(discord.ui.View):
 
             # Create the ticket channel
             ticket_channel = await interaction.guild.create_text_channel(f"ticket-{counter}", category=category)
+            #ERROR : make a limit that a user can open 3 tickets at a time
+            #ERROR : make that when creating a ticket need to check that the category exisits
             data["ticket_counter"] += 1
             
             # Set permissions
@@ -181,7 +182,13 @@ class TicketView(discord.ui.View):
             
             # Send welcome message
             welcome_msg = data["welcome_message"]
-            await ticket_channel.send(f"{interaction.user.mention} {welcome_msg}")
+            ticket_embed = discord.Embed(
+                title=f"Ticket no : {counter}",
+                description=f"{interaction.user.mention} {welcome_msg}",
+                color=discord.Colour.green()
+            )
+
+            await ticket_channel.send(embed=ticket_embed, view=CloseTicketView())##### ADD close button here #####
             
             # Use followup instead of response since we already deferred
             await interaction.followup.send(f"Ticket created! {ticket_channel.mention}", ephemeral=True)
@@ -199,6 +206,17 @@ class TicketView(discord.ui.View):
                     await interaction.response.send_message(f"Error creating ticket: {str(e)}", ephemeral=True)
                 except:
                     print(f"Failed to respond to interaction: {str(e)}")
+
+#CLose button View
+class CloseTicketView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)  # Make the view persistent
+    @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
+    async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.channel.send("Deleteing the channel in about 5 secs...")
+        await interaction.channel.delete()
+
+
 
 #!ticket panel command which sends the ticketpanel embed msg from which users can create a ticket
 @bot.command()
