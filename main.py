@@ -5,6 +5,8 @@ from discord.ui import button, View
 from dotenv import load_dotenv
 import json
 import asyncio
+import datetime
+import io
 
 # Load environment variables from .env file
 load_dotenv()
@@ -21,9 +23,9 @@ bot = commands.Bot(command_prefix='!', intents=intents)
 async def on_ready():
     print(f'{bot.user.name} has connected to Discord!')
     print(f'Bot is in {len(bot.guilds)} guilds')
-    
-    # Add all buttons to make it persistent view
+      # Add all buttons to make it persistent view
     bot.add_view(TicketView())
+    bot.add_view(CloseTicketView())
 
 
 #Test command if the bot is working or not 
@@ -154,9 +156,10 @@ class TicketView(discord.ui.View):
         directory_path = "database"
         file_name = f"{interaction.guild.id}.json"
         file_path = os.path.join(directory_path, file_name)
+        global create_ticket_user
+        create_ticket_user = interaction.user
         
         try:
-            # Acknowledge the interaction immediately to prevent timeout
             await interaction.response.defer(ephemeral=True)
             
             with open(file_path, "r") as f:
@@ -172,7 +175,6 @@ class TicketView(discord.ui.View):
             #ERROR : make that when creating a ticket need to check that the category exisits
             data["ticket_counter"] += 1
             
-            # Set permissions
             staff_role_id = data["staff_rold_id"]
             staff_role = interaction.guild.get_role(staff_role_id)
             
@@ -180,7 +182,6 @@ class TicketView(discord.ui.View):
             await ticket_channel.set_permissions(interaction.user, view_channel=True, send_messages=True)
             await ticket_channel.set_permissions(staff_role, view_channel=True, send_messages=True)
             
-            # Send welcome message
             welcome_msg = data["welcome_message"]
             ticket_embed = discord.Embed(
                 title=f"Ticket no : {counter}",
@@ -188,9 +189,7 @@ class TicketView(discord.ui.View):
                 color=discord.Colour.green()
             )
 
-            await ticket_channel.send(embed=ticket_embed, view=CloseTicketView())##### ADD close button here #####
-            
-            # Use followup instead of response since we already deferred
+            await ticket_channel.send(embed=ticket_embed, view=CloseTicketView())
             await interaction.followup.send(f"Ticket created! {ticket_channel.mention}", ephemeral=True)
 
             # Save updated counter
@@ -198,7 +197,6 @@ class TicketView(discord.ui.View):
                 json.dump(data, f, indent=4)
                 
         except Exception as e:
-            # Use try/except in case the initial response failed
             try:
                 await interaction.followup.send(f"Error creating ticket: {str(e)}", ephemeral=True)
             except:
@@ -207,14 +205,84 @@ class TicketView(discord.ui.View):
                 except:
                     print(f"Failed to respond to interaction: {str(e)}")
 
-#CLose button View
+#Close button View
 class CloseTicketView(discord.ui.View):
     def __init__(self):
         super().__init__(timeout=None)  # Make the view persistent
+    
     @discord.ui.button(label="Close Ticket", style=discord.ButtonStyle.red, custom_id="close_ticket")
     async def close_ticket(self, interaction: discord.Interaction, button: discord.ui.Button):
-        await interaction.channel.send("Deleteing the channel in about 5 secs...")
-        await interaction.channel.delete()
+        await interaction.response.defer(ephemeral=True)
+        
+        try:
+            directory_path = "database"
+            file_name = f"{interaction.guild.id}.json"
+            file_path = os.path.join(directory_path, file_name)
+            
+            with open(file_path, "r") as f:
+                data = json.load(f)
+            
+            transcript_channel_id = data["transcript_channel_id"]
+            transcript_channel = interaction.guild.get_channel(transcript_channel_id)
+            
+            if not transcript_channel:
+                await interaction.followup.send("Transcript channel not found! Deleting channel without transcript.", ephemeral=True)
+                await asyncio.sleep(3)
+                await interaction.channel.delete()
+                return
+            
+            await interaction.followup.send("Creating transcript...", ephemeral=True)
+            
+            messages = []
+            async for message in interaction.channel.history(limit=None, oldest_first=True):
+                timestamp = message.created_at.strftime("%Y-%m-%d %H:%M:%S UTC")
+                content = message.content or "[No text content]"
+                
+                attachments = ""
+                if message.attachments:
+                    attachments = " [Attachments: " + ", ".join([att.filename for att in message.attachments]) + "]"
+                
+                embeds_info = ""
+                if message.embeds:
+                    embeds_info = f" [Embeds: {len(message.embeds)} embed(s)]"
+                
+                messages.append(f"[{timestamp}] {message.author.display_name}: {content}{attachments}{embeds_info}")
+            
+            transcript_text = f"=== TICKET TRANSCRIPT ===\n"
+            transcript_text += f"Channel: {interaction.channel.name}\n"
+            transcript_text += f"Ticket created by {create_ticket_user} ({create_ticket_user.id})"
+            transcript_text += f"Closed by: {interaction.user.display_name} ({interaction.user.id})\n"
+            transcript_text += f"Closed at: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S UTC')}\n"
+            transcript_text += f"Total messages: {len(messages)}\n"
+            transcript_text += "=" * 50 + "\n\n"
+            transcript_text += "\n".join(messages)
+            
+            transcript_file = discord.File(
+                io.StringIO(transcript_text),
+                filename=f"transcript-{interaction.channel.name}-{datetime.datetime.now().strftime('%Y%m%d-%H%M%S')}.txt"
+            )
+            
+            embed = discord.Embed(
+                title=f"🎫 Ticket Transcript: {interaction.channel.name}",
+                description=f"Ticket created by : {create_ticket_user.mention}",
+                description=f"Closed by {interaction.user.mention}\nTotal messages: {len(messages)}",
+                color=discord.Color.blue(),
+                timestamp=datetime.datetime.now()
+            )
+            embed.add_field(name="Channel ID", value=interaction.channel.id, inline=True)
+            embed.add_field(name="Guild", value=interaction.guild.name, inline=True)
+            
+            await transcript_channel.send(embed=embed, file=transcript_file)
+            await asyncio.sleep(2)
+            await interaction.channel.delete()
+            
+        except Exception as e:
+            try:
+                await interaction.followup.send(f"Error creating transcript: {str(e)}\nDeleting channel anyway...", ephemeral=True)
+                await asyncio.sleep(3)
+                await interaction.channel.delete()
+            except:
+                print(f"Failed to delete channel or send error message: {str(e)}")
 
 
 
@@ -246,7 +314,9 @@ async def ticketpanel(ctx : commands.Context):
 
     # Send embed with the persistent view
     await ctx.channel.send(embed=create_ticket_embed, view=TicketView())
-        
+
+    
+
 
 
 
